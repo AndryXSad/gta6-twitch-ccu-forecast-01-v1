@@ -107,6 +107,54 @@ launches).
   whole forecast is the baseline; if the target has no pre-release history,
   both views use lnV1 alone.
 
+## Revisi v1.1 (17 Nov 2026) — extrapolation guard
+
+Change to `main.py` (in-place edit, surviving lines added): a new helper
+`_clamp_ln_v1(target, rows)` plus one call line at the top of each view
+(`ols_view`, `shape_view`), and a paragraph in the module docstring. The
+helper clamps the target's lnV1 to the local reference class's observed
+[min, max] before either view's regressions use it. Inside the range it is
+a no-op; beyond the range the forecast stays at the biggest observed
+launch's level instead of following the lnV1 slope past the data.
+
+Why: v1 extrapolates linearly in lnV1 past the library max (ELDEN RING,
+lnV1 13.68). GTA VI's hour-1 print will likely sit at or above that max.
+At hour 2 the OLS slope on lnV1 is ~1, so an extreme hour-1 print would
+be carried almost 1:1 into the hour-2 forecast, and the evening peak —
+capped in reality by how many people watch Twitch at all — would be
+pushed up with it. The clamp is the defensive shape for that tail.
+
+Candidates tried and REJECTED (all measured with the exact local scorer,
+practice + leave-one-out over the 38 comparables):
+
+| candidate | practice | LOO all | LOO lnV1>=12 |
+| --------- | -------- | ------- | ------------ |
+| v1 (baseline) | 0.154426 | 0.4283 | 0.1885 |
+| + lnCH1 as 3rd predictor | 0.152863 | 0.4439 | 0.1899 |
+| + OLS spread 0.8 -> 0.7 | 0.153786 | 0.4355 | 0.1910 |
+| + shape weight 0.5 -> 0.55 | 0.154062 | 0.4377 | 0.1886 |
+| + lnCH1 + spread 0.7 + weight 0.55 | 0.152031 | 0.4620 | 0.1943 |
+| + guard only (SHIPPED) | 0.154426 | 0.4315 | 0.1885 |
+
+Every practice gain came with a worse LOO — including on the 26 big
+launches (lnV1 >= 10) and on the 7 biggest (lnV1 >= 12), the reference
+class closest to GTA VI — so the practice gains are 4-case noise fits,
+not genuine improvements. They were not shipped. The guard is the only
+change whose practice loss is unchanged and whose cost is ~zero: LOO all
+moves only because ELDEN RING's own LOO case is clamped by 0.02 log units
+(0.0646 -> 0.0647); the lnV1>=12 mean is identical (0.1885).
+
+Verification of the shipped guard: synthetic target with hour-1 print
+3,000,000 viewers (lnV1 14.91, far above the library max) — v1 forecasts
+hour-2 median 2,973,004 and hour-19 q95 2,398,910; v1.1 forecasts hour-2
+median 806,420 and hour-19 q95 1,209,383, against ELDEN RING's true
+hour-2 801,446 / hour-19 833,065. Practice loss before/after:
+0.154426 -> 0.154426 (p00 0.122227, p01 0.199600, p02 0.123243,
+p03 0.172636 — byte-identical outputs, sha256 p00 162935983d44,
+p01 b9c915af6cd0, same as v1). Determinism (2 runs byte-identical),
+format (23 rows, hours 2-24, 5 finite quantiles in (0, 1e9],
+non-decreasing) and stdlib-only imports re-verified after the edit.
+
 ## Checks run on the submitted code
 
 - Practice loss 0.154426 (reproduces the experiment's 0.1544 exactly).

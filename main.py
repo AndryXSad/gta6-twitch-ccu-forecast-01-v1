@@ -36,6 +36,14 @@ choice, and what was tried and dropped):
      (c, s) applied to m_h, with per-hour residual spread around the
      launches' own one-factor fits.
 
+  A target whose hour-1 print exceeds every comparable's is not
+  extrapolated without bound: each view first clamps the target's lnV1 to
+  the reference class's observed range (_clamp_ln_v1). Inside the range
+  this changes nothing; beyond it, the forecast stays at the biggest
+  observed launch's level instead of following the lnV1 slope past the
+  data. The evening peak is capped by total Twitch viewership, so an
+  unbounded linear extrapolation in lnV1 is the wrong shape there.
+
   Both views use only the case file: no network, no stored tables, no model
   calls. The program is deterministic (sorted iteration, no randomness, no
   clock), standard library only, and runs in well under the 8-second limit.
@@ -203,8 +211,28 @@ def _baseline_quantiles(p1, hour):
     return [p1 * math.exp(z * 0.15 * math.sqrt(hour - 1)) for z in Z]
 
 
+def _clamp_ln_v1(target, rows):
+    """Clamp the target's lnV1 to the reference class's observed range.
+
+    Both views extrapolate linearly in lnV1; a target bigger than every
+    comparable (GTA VI's hour-1 print may exceed the library max, lnV1
+    13.68 for ELDEN RING) would otherwise be extrapolated without bound,
+    even though the evening peak is capped by how many people watch Twitch
+    at all. Inside the range this is a no-op, so the practice cases are
+    untouched (verified: practice loss identical, 0.154426).
+    """
+    seen = [r["feat"]["lnV1"] for r in rows
+            if r["feat"].get("lnV1") is not None]
+    if not seen:
+        return target
+    tgt = dict(target)
+    tgt["lnV1"] = min(max(seen), max(min(seen), target["lnV1"]))
+    return tgt
+
+
 def ols_view(target, lib):
     """View 1: per-hour local OLS of ln(viewers) on [lnV1, lnPREM]."""
+    target = _clamp_ln_v1(target, _local_library(lib, target["lnV1"]))
     keys = ["lnV1", "lnPREM"]
     if target.get("lnPREM") is None:
         keys = ["lnV1"]
@@ -231,6 +259,7 @@ def ols_view(target, lib):
 
 def shape_view(target, lib):
     """View 2: one-factor shape model on the median log-ratio curve."""
+    target = _clamp_ln_v1(target, _local_library(lib, target["lnV1"]))
     keys = ["lnV1", "lnPREM"]
     if target.get("lnPREM") is None:
         keys = ["lnV1"]
